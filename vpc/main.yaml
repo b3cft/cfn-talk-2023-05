@@ -482,7 +482,7 @@ Resources:
           FromPort: -1
           ToPort: -1
           CidrIp: !Ref Cidr
-          Description: Allow All Traffic within Vpc
+          Description: Allow Pinging within Vpc
       Tags:
         - Key: Name
           Value: !Sub ${Environment}-default-security
