@@ -1,0 +1,4 @@
+# Add your S3 bucket name here, it must already exist and be in the region cloudformation you will deploy from
+BUCKET = my-example-bucket
+# If you deploy to multiple regions you can add a region suffix like so
+#BUCKET = my-cfn-template-$(REGION)

@@ -1,0 +1,225 @@
+.DEFAULT: help
+SHELL=bash
+ifndef VERBOSE
+.SILENT:
+endif
+UNAME_S := $(shell uname -s)
+S3PATH := $(shell pwd|awk -F'/' '{print $$NF}')
+REGION ?= eu-west-1
+STACK_NAME ?= $(ENV)-$(S3PATH)
+DONE = echo ✓ $@ done
+include ../bucket.location
+
+#Colours
+NO_COLOUR=\033[0m
+OK_COLOUR=\033[1;32ENV=examplem
+INFO_COLOUR=\033[1;33m
+SECTION_COLOUR=\033[1;37m
+ERROR_COLOUR=\033[1;35m
+WARN_COLOUR=\033[0;33m
+
+.PHONY: help
+help::
+	awk 'BEGIN {FS = ":.*##"; printf "\n\t\tCloudformation Makefile for $(INFO_COLOUR)$(S3PATH)$(NO_COLOUR) stack.\n"} {gsub("_cfn:", ":")} /^[a-zA-Z_-]+:.*?##/  { printf "  $(INFO_COLOUR)%-25s$(NO_COLOUR) %s\n", $$1, $$2 } /^##@/ { printf "\n$(SECTION_COLOUR)%s$(NO_COLOUR)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	echo -e "\nAdditional parameters passed to make"
+	echo -e "$(INFO_COLOUR)ENV=<env>$(NO_COLOUR)            update a specific env e.g preprod"
+
+TEMPLATES ?= $(shell find . -type f -name '*.yaml' -not -name 'deploy.yaml')
+
+.PHONY: debug
+debug:
+	echo Region: $(REGION)
+	echo BUCKET: $(BUCKET)
+	echo S3PATH: $(S3PATH)
+	echo ENV: $(ENV)
+	echo STACK: $(STACK_NAME)
+	echo TEMPLATES: $(TEMPLATES)
+	$(DONE)
+
+##@ Stack Commands
+
+.PHONY: create-stack
+create-stack: valid-params sync  ## Create a new stack
+	aws cloudformation create-stack \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME) \
+	    --template-url https://s3.amazonaws.com/$(BUCKET)/$(S3PATH)/main.yaml \
+	    --tags \
+	        Key=Name,Value=$(ENV)-$(S3PATH) \
+	        Key=Environment,Value=$(ENV) \
+	        Key=Stack,Value=$(S3PATH) \
+	    --parameters \
+	        ParameterKey=Environment,ParameterValue=$(ENV) \
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	$(DONE)
+
+.PHONY: update-stack
+update-stack: valid-params sync ## Update the stack
+	aws cloudformation update-stack \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME) \
+	    --template-url https://s3.amazonaws.com/$(BUCKET)/$(S3PATH)/main.yaml \
+	    --tags \
+	        Key=Name,Value=$(ENV)-$(S3PATH) \
+	        Key=Environment,Value=$(ENV) \
+	        Key=Stack,Value=$(S3PATH) \
+	    --parameters \
+	        ParameterKey=Environment,UsePreviousValue=true \
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	$(DONE)
+
+.PHONY: create-stack-changeset
+create-stack-changeset: valid-params sync ## Create a new changeset for the stack
+	aws cloudformation create-change-set \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME) \
+	    --change-set-name $(STACK_NAME) \
+	    --template-url https://s3.amazonaws.com/$(BUCKET)/$(S3PATH)/main.yaml \
+	    --tags \
+	        Key=Name,Value=$(ENV)-$(S3PATH) \
+	        Key=Environment,Value=$(ENV) \
+	        Key=Stack,Value=$(S3PATH) \
+	    --parameters \
+	        ParameterKey=Environment,ParameterValue=$(ENV) \
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	$(DONE)
+
+.PHONY: describe-stack-changeset
+describe-stack-changeset: valid-params sync ## Describe changes from a changeset on the stack (create-stack-changeset)
+	CHANGES=`aws cloudformation describe-change-set \
+	    --region $(REGION) \
+	    --stack-name $(STACK_NAME) \
+	    --change-set-name $(STACK_NAME) |jq -r '.Changes[].ResourceChange|[.LogicalResourceId, .Action, .Replacement]|@tsv'`; \
+	echo -e "\nResource\tAction\tReplaced\n$$CHANGES\n" | column -t
+	$(DONE)
+
+.PHONY: describe-stack-changeset-full
+describe-stack-changeset-full: valid-params ## Display the full json changes from a changeset on the stack (create-stack-changeset)
+	aws cloudformation describe-change-set \
+	    --region $(REGION) \
+	    --stack-name $(STACK_NAME) \
+	    --change-set-name $(STACK_NAME) |jq -r .
+	$(DONE)
+
+.PHONY: discard-stack-changeset
+discard-stack-changeset: valid-params ## Discard the changes from a changeset on the stack (create-stack-changeset)
+	aws cloudformation delete-change-set \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME) \
+	    --change-set-name $(STACK_NAME)
+	$(DONE)
+
+.PHONY: apply-stack-changeset
+apply-stack-changeset: valid-params ## Apply the changes from a changeset on the stack (create-stack-changeset)
+	aws cloudformation execute-change-set \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME) \
+	    --change-set-name $(STACK_NAME)
+	$(DONE)
+
+update-stack-ssm_cfn: valid-params
+	aws cloudformation update-stack \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME) \
+	    --use-previous-template \
+	    --tags \
+	        Key=Name,Value=$(ENV)-$(S3PATH) \
+	        Key=Environment,Value=$(ENV) \
+	        Key=Stack,Value=$(S3PATH) \
+	    --parameters \
+	        ParameterKey=Environment,UsePreviousValue=true \
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	$(DONE)
+
+delete-stack: valid-params ## Delete a stack *** USE WITH CAUTION ***
+	if [[ "$(CONFIRM)" != "YES" ]]; then echo -e "$(ERROR_COLOUR)CONFIRM$(NO_COLOUR) must be YES\n"; exit 1; fi;
+	aws cloudformation delete-stack \
+	    --region $(REGION) \
+	    --output text \
+	    --stack-name $(STACK_NAME)
+
+show-outputs: valid-params ## Show Stack outputs
+	echo -e "$(INFO_COLOUR)Current Stack Outputs$(NO_COLOUR)\n"
+	-aws cloudformation describe-stacks \
+	    --region $(REGION) \
+	    --output json \
+	    --stack-name $(STACK_NAME) \
+	    |jq -r '.Stacks[].Outputs[]|[.OutputKey, .OutputValue, .ExportName]|@tsv'|column -t
+
+show-parameters: show-stack-parameters show-ssm-parameters ## Show the SSM Parameters used in this stack.
+	$(DONE)
+
+show-stack-parameters: valid-params
+	echo -e "$(INFO_COLOUR)Current Stack Resolved Parameters$(NO_COLOUR)\n"
+	-aws cloudformation describe-stacks \
+	    --region $(REGION) \
+	    --output json \
+	    --stack-name $(STACK_NAME) \
+	    |jq -r '.Stacks[].Parameters[]|[.ParameterKey, .ResolvedValue, .ParameterValue]|@tsv'|column -t
+
+show-ssm-parameters:
+	echo -e "\n$(INFO_COLOUR)SSM Stored Parameter$(NO_COLOUR)\n"
+	aws ssm get-parameters-by-path \
+	    --region $(REGION) \
+	    --output text \
+	    --recursive \
+	    --path '/' \
+	    --parameter-filters 'Key=tag:Stack,Values=ami,$(S3PATH)' \
+	    --query 'Parameters[*].[Name,Value]'|grep -E '^/(ami/.*/(base|$(S3PATH))|(base|$(S3PATH)))/'|column -t|sort
+	echo -e "\n"
+	$(DONE)
+
+update-parameter: ## Update an SSM Parameter. *** USE WITH CAUTION ***
+	if [[ -z "$(REGION)" ]] || [[ -z "$(NAME)" ]] || [[ -z "$(VALUE)" ]]; then echo "REGION, NAME and VALUE must be specified"; exit 1; fi
+	aws ssm put-parameter \
+	    --region $(REGION) \
+	    --output text \
+		--type "String" \
+		--overwrite \
+		--name "$(NAME)" \
+		--value "$(VALUE)"
+	$(DONE)
+
+delete-parameter: ## Delete an SSM Parameter. *** USE WITH CAUTION ***
+	if [[ "$(CONFIRM)" != "YES" ]]; then echo -e "$(ERROR_COLOUR)CONFIRM$(NO_COLOUR) must be YES\n"; exit 1; fi;
+	aws ssm delete-parameter \
+	    --region $(REGION) \
+	    --output text \
+		--name "$(NAME)"
+	$(DONE)
+
+##@ Common tasks
+
+test: $(TEMPLATES) ## Syntax test templates
+
+sync: test ## Upload cloudformation templates to S3 ready for creating/updating a stack
+	aws s3 sync --region eu-west-1 --output text ./ s3://$(BUCKET)/$(S3PATH)/ --exclude=*.swp --exclude=.* --exclude=*.md --exclude=Makefile
+	$(DONE)
+
+##@ Helper Tasks
+
+.PHONY: $(TEMPLATES)
+$(TEMPLATES):
+ifndef SKIPTEST
+	echo Testing $@
+	aws cloudformation validate-template --template-body file://$@ >/dev/null
+	$(DONE)
+else
+	echo SKIPPING Testing $@
+endif
+
+valid-params:
+	if [[ -z "$(REGION)" ]]; then ERROR=1; ERROR_MSG="$${ERROR_MSG}$(ERROR_COLOUR)REGION$(NO_COLOUR) must be specified\n"; fi; \
+	if [[ -z "$(ENV)" ]]; then  ERROR=1; ERROR_MSG="$${ERROR_MSG}$(ERROR_COLOUR)ENV$(NO_COLOUR) must be specified\n"; fi; \
+    if [[ ! -z "$$ERROR" ]]; then echo -e $$ERROR_MSG; exit 1; fi
+	$(DONE)
+
+# Allow local override of valid-params without errors
+%: %_cfn
+	@ true

@@ -1,0 +1,679 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Vpc with 10.x.0.0/16 and /20 subnets private and public.
+  Internet Gateway and NAT with route tables and subnets.
+  Use AmazonLinux NAT Gateway Instances
+
+Parameters:
+  Environment:
+    Description: AWS Environment/VPC name to be used
+    Type: String
+    AllowedValues:
+      - example
+  Stack:
+    Type: String
+    Default: vpc
+  NatStack:
+    Type: String
+    Default: nat-gateway
+  KeyName:
+    Description: AWS Region used for the environment
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /example/vpc/ec2-keyname
+  Cidr:
+    Description: 10.x.0.0/16 Cidr to use.
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /example/vpc/cidr
+  SingleNat:
+    Description: set 'true' to use just a single Nat Gateway
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /example/vpc/single-nat
+
+Conditions:
+  MultiNat: !Not [!Equals [!Ref SingleNat, 'true']]
+
+Mappings:
+  # If updating instances add a `base-v2` here then update launchtemplate
+  # aws --region eu-west-1 ssm get-parameters --names /aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-arm64-gp2 --query 'Parameters[0].[Value]' --output text
+  AmiMap:
+    # v1: Amazon Linux 2 LTS Arm64 Kernel 5.10 AMI 2.0.20230418.0 arm64 HVM gp2
+    eu-west-1:
+      v1: ami-0ee797ff2e229ba08
+    us-west-2:
+      v1: ami-04745f188144eea10
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref Cidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref Environment
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  DhcpOption:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: !Sub ${AWS::Region}.compute.internal
+      DomainNameServers:
+        - AmazonProvidedDNS
+      Tags:
+        - Key: Name
+          Value: !Ref Environment
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  VpcDhcpOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      VpcId: !Ref Vpc
+      DhcpOptionsId: !Ref DhcpOption
+
+  PrivateA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Select [0, !Cidr [!GetAtt Vpc.CidrBlock, 8, 12]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-private-a
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}b
+      CidrBlock: !Select [1, !Cidr [!GetAtt Vpc.CidrBlock, 8, 12]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-private-b
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Select [2, !Cidr [!GetAtt Vpc.CidrBlock, 8, 12]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-private-c
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Select [4, !Cidr [!GetAtt Vpc.CidrBlock, 8, 12]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-public-a
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}b
+      CidrBlock: !Select [5, !Cidr [!GetAtt Vpc.CidrBlock, 8, 12]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-public-b
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Select [6, !Cidr [!GetAtt Vpc.CidrBlock, 8, 12]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-public-c
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}.lovecrafts.cool
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  EIPA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-a
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatA:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref PublicA
+      SourceDestCheck: false
+      GroupSet:
+        - !Ref NatSecurity
+        - !Ref DefaultSecurity
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-{NatStack}-a
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatAEipAssociation:
+    DependsOn: AttachGateway
+    DependsOn: NatAInstance
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIPA.AllocationId
+      NetworkInterfaceId: !Ref NatA
+
+  EIPB:
+    Condition: MultiNat
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-b
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatB:
+    Condition: MultiNat
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref PublicB
+      SourceDestCheck: false
+      GroupSet:
+        - !Ref NatSecurity
+        - !Ref DefaultSecurity
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-b
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatBEipAssociation:
+    Condition: MultiNat
+    DependsOn: AttachGateway
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIPB.AllocationId
+      NetworkInterfaceId: !Ref NatB
+
+  EIPC:
+    Condition: MultiNat
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-c
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatC:
+    Condition: MultiNat
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref PublicC
+      SourceDestCheck: false
+      GroupSet:
+        - !Ref NatSecurity
+        - !Ref DefaultSecurity
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-c
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatCEipAssociation:
+    Condition: MultiNat
+    DependsOn: AttachGateway
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIPC.AllocationId
+      NetworkInterfaceId: !Ref NatC
+
+  PublicRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-public-a
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-public-b
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-public-c
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-private-a
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-private-b
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-private-c
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicRoute2AnywhereA:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRoute2AnywhereB:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRoute2AnywhereC:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTableC
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute2AnywhereA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NetworkInterfaceId: !Ref NatA
+
+  PrivateRoute2AnywhereB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NetworkInterfaceId: !If [MultiNat, !Ref NatB, !Ref NatA]
+
+  PrivateRoute2AnywhereC:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableC
+      DestinationCidrBlock: 0.0.0.0/0
+      NetworkInterfaceId: !If [MultiNat, !Ref NatC, !Ref NatA]
+
+  SubnetRouteTablePublicA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicA
+      RouteTableId: !Ref PublicRouteTableA
+
+  SubnetRouteTablePublicB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicB
+      RouteTableId: !Ref PublicRouteTableB
+
+  SubnetRouteTablePublicC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicC
+      RouteTableId: !Ref PublicRouteTableC
+
+  SubnetRouteTablePrivateA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  SubnetRouteTablePrivateB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  SubnetRouteTablePrivateC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateC
+      RouteTableId: !Ref PrivateRouteTableC
+
+  ##
+  ## Security Groups
+  ##
+
+  NatSecurity:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${Environment} NAT Gateway Security Group
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref Cidr
+          Description: Allow All Traffic within Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-default-security
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  DefaultSecurity:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${Environment} Default Security Group
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref Cidr
+          Description: Allow All Traffic within Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-default-security
+        - Key: Stack
+          Value: !Ref Stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  ##
+  ## NAT Gateway instances
+  ##
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${Environment}-${NatStack}
+      LaunchTemplateData:
+        ImageId: !FindInMap [AmiMap, !Ref AWS::Region, v1]
+        KeyName: !Ref KeyName
+        InstanceType: t4g.micro
+        EbsOptimized: true
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 20
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
+        Monitoring:
+          Enabled: true
+        HibernationOptions:
+          Configured: false # should be able to set true on AmazonLinux
+        InstanceInitiatedShutdownBehavior: terminate # or stop
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: optional # or required may break stuff depending on sdk in use
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -x
+            exec > >(tee /var/log/user-data.log|logger -t '[user-data]' -s 2>/dev/console) 2>&1
+
+            yum install iptables-services -y
+            sysctl -w net.ipv4.ip_forward=1
+            /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+            service iptables save
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Stack
+                Value: !Ref NatStack
+              - Key: Environment
+                Value: !Ref Environment
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub ${Environment}-${NatStack}
+              - Key: Stack
+                Value: !Ref NatStack
+              - Key: Environment
+                Value: !Ref Environment
+
+  NatAInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Monitoring: True
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          DeleteOnTermination: False
+          NetworkInterfaceId: !Ref NatA
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-a
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatBInstance:
+    Condition: MultiNat
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}b
+      Monitoring: True
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          DeleteOnTermination: False
+          NetworkInterfaceId: !Ref NatB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-b
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatCInstance:
+    Condition: MultiNat
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Monitoring: True
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          DeleteOnTermination: False
+          NetworkInterfaceId: !Ref NatC
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-${NatStack}-c
+        - Key: Stack
+          Value: !Ref NatStack
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  Vpc:
+    Description: Vpc Id
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub ${Environment}-VpcId
+  PrivateSubnetA:
+    Description: Subnet Id for Private Subnet A
+    Value: !Ref PrivateA
+    Export:
+      Name: !Sub ${Environment}-Private-Subnet-A
+  PrivateSubnetB:
+    Description: Subnet Id for Private Subnet B
+    Value: !Ref PrivateB
+    Export:
+      Name: !Sub ${Environment}-Private-Subnet-B
+  PrivateSubnetC:
+    Description: Subnet Id for Private Subnet C
+    Value: !Ref PrivateC
+    Export:
+      Name: !Sub ${Environment}-Private-Subnet-C
+  PublicSubnetA:
+    Description: Subnet Id for Public Subnet A
+    Value: !Ref PublicA
+    Export:
+      Name: !Sub ${Environment}-Public-Subnet-A
+  PublicSubnetB:
+    Description: Subnet Id for Public Subnet B
+    Value: !Ref PublicB
+    Export:
+      Name: !Sub ${Environment}-Public-Subnet-B
+  PublicSubnetC:
+    Description: Subnet Id for Public Subnet C
+    Value: !Ref PublicC
+    Export:
+      Name: !Sub ${Environment}-Public-Subnet-C
+  PublicRouteTableA:
+    Description: Public Routing Table A
+    Value: !Ref PublicRouteTableA
+    Export:
+      Name: !Sub ${Environment}-Public-Route-A
+  PublicRouteTableB:
+    Description: Public Routing Table B
+    Value: !Ref PublicRouteTableB
+    Export:
+      Name: !Sub ${Environment}-Public-Route-B
+  PublicRouteTableC:
+    Description: Public Routing Table C
+    Value: !Ref PublicRouteTableC
+    Export:
+      Name: !Sub ${Environment}-Public-Route-C
+  PrivateRouteTableA:
+    Description: Private Routing Table A
+    Value: !Ref PrivateRouteTableA
+    Export:
+      Name: !Sub ${Environment}-Private-Route-A
+  PrivateRouteTableB:
+    Description: Private Routing Table B
+    Value: !Ref PrivateRouteTableB
+    Export:
+      Name: !Sub ${Environment}-Private-Route-B
+  PrivateRouteTableC:
+    Description: Private Routing Table C
+    Value: !Ref PrivateRouteTableC
+    Export:
+      Name: !Sub ${Environment}-Private-Route-C
+  DefaultSecurity:
+    Description: Default security group for instances in this vpc
+    Value: !Ref DefaultSecurity
+    Export:
+      Name: !Sub ${Environment}-DefaultSecurity
