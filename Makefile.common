@@ -51,7 +51,7 @@ create-stack: valid-params sync  ## Create a new stack
 	        Key=Stack,Value=$(S3PATH) \
 	    --parameters \
 	        ParameterKey=Environment,ParameterValue=$(ENV) \
-	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 	$(DONE)
 
 .PHONY: update-stack
@@ -67,7 +67,7 @@ update-stack: valid-params sync ## Update the stack
 	        Key=Stack,Value=$(S3PATH) \
 	    --parameters \
 	        ParameterKey=Environment,UsePreviousValue=true \
-	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 	$(DONE)
 
 .PHONY: create-stack-changeset
@@ -84,7 +84,7 @@ create-stack-changeset: valid-params sync ## Create a new changeset for the stac
 	        Key=Stack,Value=$(S3PATH) \
 	    --parameters \
 	        ParameterKey=Environment,ParameterValue=$(ENV) \
-	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 	$(DONE)
 
 .PHONY: describe-stack-changeset
@@ -122,7 +122,7 @@ apply-stack-changeset: valid-params ## Apply the changes from a changeset on the
 	    --change-set-name $(STACK_NAME)
 	$(DONE)
 
-update-stack-ssm_cfn: valid-params
+update-stack-ssm: valid-params
 	aws cloudformation update-stack \
 	    --region $(REGION) \
 	    --output text \
@@ -134,7 +134,7 @@ update-stack-ssm_cfn: valid-params
 	        Key=Stack,Value=$(S3PATH) \
 	    --parameters \
 	        ParameterKey=Environment,UsePreviousValue=true \
-	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+	    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 	$(DONE)
 
 delete-stack: valid-params ## Delete a stack *** USE WITH CAUTION ***
