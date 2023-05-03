@@ -19,7 +19,7 @@ Parameters:
   KeyName:
     Description: AWS Region used for the environment
     Type: AWS::SSM::Parameter::Value<String>
-    Default: /example-vpc/ec2-keyname
+    Default: /base/example/ec2-keyname
   Cidr:
     Description: 10.x.0.0/16 Cidr to use.
     Type: AWS::SSM::Parameter::Value<String>
